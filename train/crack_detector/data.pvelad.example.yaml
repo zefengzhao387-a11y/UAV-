@@ -1,0 +1,8 @@
+path: D:/datasets/PVEL-AD-YOLO
+train: images/train
+val: images/val
+test: images/test
+
+# 建议将微裂纹相关类别并为 crack，先做单类小目标检测
+names:
+  0: crack

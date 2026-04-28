@@ -1,0 +1,6 @@
+node_modules
+.next
+*.pt
+*.onnx.data
+_export_workspace/
+_hf_hotspot_space/
