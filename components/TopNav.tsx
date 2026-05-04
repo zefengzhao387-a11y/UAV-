@@ -29,7 +29,7 @@ export default function TopNav({ active }: TopNavProps) {
             >
               项目简介
             </Link>
-            <span className="hidden text-xs text-slate-400 md:block">ONNX Runtime Web · Edge AI</span>
+            <span className="hidden text-xs text-slate-400 md:block">服务端 Ultralytics/YOLO 推理 · 远端 API</span>
           </div>
         </div>
       </div>

@@ -11,6 +11,8 @@ from yolo_infer import run_yolo_inference, run_yolo_inference_with_debug
 
 app = FastAPI(title="YOLO Web Inference")
 
+INFER_ENGINE = os.environ.get("YOLOWEB_INFER_ENGINE", "ultralytics").strip().lower()
+
 _cors_origins_raw = os.environ.get("YOLOWEB_CORS_ORIGINS", "").strip()
 if _cors_origins_raw == "*":
     _origins = ["*"]
@@ -19,11 +21,12 @@ elif _cors_origins_raw:
 else:
     _origins = ["http://127.0.0.1:3000", "http://localhost:3000"]
 
+# 本推理 API 不使用 Cookie / Authorization；allow_credentials=False 可与 allow_origins="*" 并存，避免浏览器 CORS 静默失败。
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
-    allow_credentials=True,
-    allow_methods=["POST", "OPTIONS"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS", "HEAD"],
     allow_headers=["*"],
 )
 
@@ -35,7 +38,18 @@ THERMAL_MODEL = os.environ.get("YOLOWEB_THERMAL_ONNX") or os.path.join(_DEFAULT_
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "inferEngine": INFER_ENGINE}
+
+
+@app.get("/health/models")
+def health_models() -> dict[str, str | bool]:
+    """检查默认或环境变量指向的 ONNX 是否在磁盘存在（Deploy 后用此路由排查路径问题）。"""
+    return {
+        "visiblePath": VISIBLE_MODEL,
+        "thermalPath": THERMAL_MODEL,
+        "visibleExists": os.path.isfile(VISIBLE_MODEL),
+        "thermalExists": os.path.isfile(THERMAL_MODEL),
+    }
 
 
 @app.post("/detect")
@@ -101,6 +115,31 @@ def detect(
     )
 
     try:
+        if INFER_ENGINE in ("ultra", "ultralytics"):
+            from yolo_ultralytics_infer import (  # noqa: PLC0415
+                ultralytics_debug_stub,
+                ultralytics_infer,
+            )
+
+            isz_raw = opts.get("imgsz")
+            imgsz: int | None
+            if isinstance(isz_raw, (int, float)):
+                imgsz = int(isz_raw)
+            else:
+                imgsz = None
+
+            boxes = ultralytics_infer(
+                image,
+                path,
+                conf=float(infer_kw["score_threshold"]),
+                iou=float(infer_kw["iou_threshold"]),
+                max_detections=int(infer_kw["max_detections"]),
+                imgsz=imgsz,
+            )
+            if dbg:
+                return {"boxes": boxes, "debug": ultralytics_debug_stub(boxes)}
+            return {"boxes": boxes}
+
         if dbg:
             boxes, dbg_info = run_yolo_inference_with_debug(image, path, **infer_kw)
             return {"boxes": boxes, "debug": dbg_info}

@@ -68,6 +68,8 @@ async function inferRemoteImpl(
 
   const res = await fetch(`${base}/detect`, {
     method: "POST",
+    mode: "cors",
+    credentials: "omit",
     body: form
   });
 
