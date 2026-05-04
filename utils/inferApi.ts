@@ -17,6 +17,15 @@ const VERCEL_PROTECTION_BYPASS = (
   process.env.NEXT_PUBLIC_VERCEL_PROTECTION_BYPASS ?? ""
 ).trim();
 
+/**
+ * 设为 1 / true / yes 时使用远程推理（原 Render / infer-proxy 链路）。
+ * 默认关闭：在浏览器用 ONNXRuntime Web 跑 public/model 下模型。
+ */
+export function useRemoteInfer(): boolean {
+  const raw = process.env.NEXT_PUBLIC_USE_REMOTE_INFER?.toLowerCase().trim();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
 /** 默认启用同源代理，规避浏览器 Failed to fetch（跨域）。设为 0 / false / no 关闭。 */
 export function useInferProxy(): boolean {
   const raw = process.env.NEXT_PUBLIC_USE_INFER_PROXY;
@@ -34,6 +43,9 @@ function useProxyFailover(): boolean {
 }
 
 export function inferForwardingDescription(): string {
+  if (!useRemoteInfer()) {
+    return "浏览器 ONNX（onnxruntime-web，默认加载 public/model/ 下 ONNX）";
+  }
   const px = useInferProxy();
   const fo = !px && useProxyFailover();
   if (px) {
@@ -47,7 +59,8 @@ export function inferForwardingDescription(): string {
 }
 
 export function inferServiceConfigured(): boolean {
-  if (useInferProxy()) return true;
+  if (!useRemoteInfer()) return true;
+  if (useInferProxy()) return Boolean(INFER_SERVICE_URL.trim());
   return Boolean(INFER_SERVICE_URL.trim());
 }
 

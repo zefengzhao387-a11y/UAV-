@@ -8,8 +8,10 @@ import { drawBoundingBoxes } from "@/utils/modelHelper";
 import {
   inferForwardingDescription,
   inferServiceConfigured,
-  runYoloInferRemote
+  runYoloInferRemote,
+  useRemoteInfer
 } from "@/utils/inferApi";
+import { runYoloInferClient } from "@/utils/yoloClientInfer";
 
 const VISIBLE_CLASSES = ["Clean", "Dust", "Bird", "Electrical", "Physical", "Snow"];
 // 官方微调后导出的热力模型为单类 hotspot。
@@ -48,14 +50,17 @@ function useObjectUrl(file: File | null): string | null {
 }
 
 export default function AnalysisWorkspace() {
+  const remoteInfer = useRemoteInfer();
   const [visibleFile, setVisibleFile] = useState<File | null>(null);
   const [thermalFile, setThermalFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const inferConfigured = useMemo(() => inferServiceConfigured(), []);
   const [statusText, setStatusText] = useState(() =>
-    inferServiceConfigured()
-      ? "等待上传两张图像（推理在服务端执行）"
-      : "请在环境变量 NEXT_PUBLIC_INFER_SERVICE_URL 中配置后端推理服务的完整 origin"
+    !useRemoteInfer()
+      ? "等待上传两张图像（推理在浏览器内执行，首次会下载 ONNX 与 WASM）"
+      : inferServiceConfigured()
+        ? "等待上传两张图像（推理在服务端执行）"
+        : "请在环境变量 NEXT_PUBLIC_INFER_SERVICE_URL 中配置后端推理服务的完整 origin"
   );
   const [errorText, setErrorText] = useState<string | null>(null);
   const [debugEnabled, setDebugEnabled] = useState(false);
@@ -174,6 +179,8 @@ export default function AnalysisWorkspace() {
     setIsAnalyzing(true);
 
     try {
+      const inferExec = remoteInfer ? runYoloInferRemote : runYoloInferClient;
+
       const [visibleImage, thermalImage] = await Promise.all([
         waitImageReady(visibleImgRef),
         waitImageReady(thermalImgRef)
@@ -186,7 +193,7 @@ export default function AnalysisWorkspace() {
       setStatusText("正在分析可见光图像...");
       let visibleBoxes: DetectionBox[];
       if (debugEnabled) {
-        const result = await runYoloInferRemote(
+        const result = await inferExec(
           visibleFile,
           "visible",
           visibleAnalyzeOptions,
@@ -196,7 +203,7 @@ export default function AnalysisWorkspace() {
         visibleBoxes = result.boxes;
         setVisibleDebug(result.debug ?? null);
       } else {
-        const result = await runYoloInferRemote(
+        const result = await inferExec(
           visibleFile,
           "visible",
           visibleAnalyzeOptions,
@@ -219,7 +226,7 @@ export default function AnalysisWorkspace() {
       setStatusText("正在分析红外热力图...");
       let thermalBoxes: DetectionBox[];
       if (debugEnabled) {
-        const result = await runYoloInferRemote(
+        const result = await inferExec(
           thermalFile,
           "thermal",
           thermalAnalyzeOptions,
@@ -229,7 +236,7 @@ export default function AnalysisWorkspace() {
         thermalBoxes = result.boxes;
         setThermalDebug(result.debug ?? null);
       } else {
-        const result = await runYoloInferRemote(
+        const result = await inferExec(
           thermalFile,
           "thermal",
           thermalAnalyzeOptions,
@@ -284,7 +291,9 @@ export default function AnalysisWorkspace() {
       }
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "分析失败");
-      setStatusText("分析失败，请检查推理服务、网络与图像");
+      setStatusText(
+        remoteInfer ? "分析失败，请检查推理服务、网络与图像" : "分析失败：请确认 public/model/ 中 ONNX 可访问（或 NEXT_PUBLIC_*_MODEL_URL），并查看控制台"
+      );
     } finally {
       setIsAnalyzing(false);
     }
@@ -328,19 +337,26 @@ export default function AnalysisWorkspace() {
       </section>
 
       <section className="mt-7 flex flex-col items-center gap-3">
-        {!inferConfigured ? (
+        {!remoteInfer ? (
+          <p className="w-full max-w-3xl text-center text-xs text-slate-400">
+            推理链路：<span className="text-slate-300">{inferForwardingDescription()}</span>
+          </p>
+        ) : !inferConfigured ? (
           <div className="panel w-full max-w-3xl border border-rose-900/70 bg-rose-950/30 px-4 py-3 text-sm text-rose-200">
             <p className="font-semibold text-rose-100">推理服务地址未配置</p>
             <p className="mt-2 text-xs text-rose-200/90">
-              请在 Vercel → Environment Variables 添加{" "}
+              远程模式需在 Vercel / 本地环境中添加{" "}
               <code className="rounded bg-slate-950 px-1 py-0.5 font-mono text-slate-200">
                 NEXT_PUBLIC_INFER_SERVICE_URL
               </code>{" "}
               （例如{" "}
               <code className="rounded bg-slate-950 px-1 py-0.5 font-mono">https://uav.onrender.com</code>
               ，无尾部斜杠）。默认由本站{" "}
-              <code className="font-mono">/api/infer-proxy</code> 转发至 Render，避免浏览器跨域
-              Failed to fetch。
+              <code className="font-mono">/api/infer-proxy</code> 转发。
+            </p>
+            <p className="mt-2 text-xs text-slate-300">
+              若改回仅在浏览器推理，移除{" "}
+              <code className="font-mono">NEXT_PUBLIC_USE_REMOTE_INFER</code>。
             </p>
           </div>
         ) : (
