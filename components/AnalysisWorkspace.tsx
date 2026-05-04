@@ -6,9 +6,9 @@ import TopNav from "@/components/TopNav";
 import type { DetectionBox, PostprocessDebugInfo } from "@/utils/modelHelper";
 import { drawBoundingBoxes } from "@/utils/modelHelper";
 import {
+  inferForwardingDescription,
   inferServiceConfigured,
-  runYoloInferRemote,
-  INFER_SERVICE_URL
+  runYoloInferRemote
 } from "@/utils/inferApi";
 
 const VISIBLE_CLASSES = ["Clean", "Dust", "Bird", "Electrical", "Physical", "Snow"];
@@ -332,20 +332,21 @@ export default function AnalysisWorkspace() {
           <div className="panel w-full max-w-3xl border border-rose-900/70 bg-rose-950/30 px-4 py-3 text-sm text-rose-200">
             <p className="font-semibold text-rose-100">推理服务地址未配置</p>
             <p className="mt-2 text-xs text-rose-200/90">
-              部署时在 Vercel 项目 Settings → Environment Variables 添加{" "}
+              请在 Vercel → Environment Variables 添加{" "}
               <code className="rounded bg-slate-950 px-1 py-0.5 font-mono text-slate-200">
                 NEXT_PUBLIC_INFER_SERVICE_URL
               </code>{" "}
-             ，值为后端 API 的根地址（HTTPS，不含尾部斜杠），例如{" "}
-              <code className="rounded bg-slate-950 px-1 py-0.5 font-mono">
-                https://your-infer-xxxxx.up.railway.app
-              </code>
-              。ONNX 仅部署在该后端，Vercel 只托管本前端。
+              （例如{" "}
+              <code className="rounded bg-slate-950 px-1 py-0.5 font-mono">https://uav.onrender.com</code>
+              ，无尾部斜杠）。默认由本站{" "}
+              <code className="font-mono">/api/infer-proxy</code> 转发至 Render，避免浏览器跨域
+              Failed to fetch。
             </p>
           </div>
         ) : (
           <p className="w-full max-w-3xl text-center text-xs text-slate-400">
-            推理服务：<span className="text-slate-300">{INFER_SERVICE_URL}</span>（预处理与 ONNX 在上述地址执行）
+            推理链路：<span className="text-slate-300">{inferForwardingDescription()}</span>
+            （首次推理可能较慢）
           </p>
         )}
         <div className="panel w-full max-w-3xl px-4 py-4">
