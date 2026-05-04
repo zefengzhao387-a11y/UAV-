@@ -1,0 +1,58 @@
+{
+  "boxes": [
+    {
+      "className": "Hotspot",
+      "classId": 1,
+      "score": 0.462,
+      "xMin": 529,
+      "yMin": 388,
+      "xMax": 600,
+      "yMax": 428
+    },
+    {
+      "className": "Hotspot",
+      "classId": 1,
+      "score": 0.409,
+      "xMin": 701,
+      "yMin": 388,
+      "xMax": 763,
+      "yMax": 424
+    },
+    {
+      "className": "Hotspot",
+      "classId": 1,
+      "score": 0.356,
+      "xMin": 600,
+      "yMin": 366,
+      "xMax": 655,
+      "yMax": 396
+    },
+    {
+      "className": "Hotspot",
+      "classId": 1,
+      "score": 0.237,
+      "xMin": 642,
+      "yMin": 190,
+      "xMax": 697,
+      "yMax": 216
+    },
+    {
+      "className": "Hotspot",
+      "classId": 1,
+      "score": 0.228,
+      "xMin": 524,
+      "yMin": 321,
+      "xMax": 585,
+      "yMax": 377
+    },
+    {
+      "className": "Hotspot",
+      "classId": 1,
+      "score": 0.22,
+      "xMin": 592,
+      "yMin": 144,
+      "xMax": 642,
+      "yMax": 168
+    }
+  ]
+}
