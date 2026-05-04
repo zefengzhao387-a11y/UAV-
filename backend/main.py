@@ -117,10 +117,20 @@ def detect(
 
     try:
         if INFER_ENGINE in ("ultra", "ultralytics"):
-            from yolo_ultralytics_infer import (  # noqa: PLC0415
-                ultralytics_debug_stub,
-                ultralytics_infer,
-            )
+            try:
+                from yolo_ultralytics_infer import (  # noqa: PLC0415
+                    ultralytics_debug_stub,
+                    ultralytics_infer,
+                )
+            except ImportError as e:
+                raise HTTPException(
+                    status_code=501,
+                    detail=(
+                        "未安装 Ultralytics/Torch（512MB 实例请改用默认 onnx：不要装 "
+                        "requirements-ultralytics.txt，或 Render Build 仅用 requirements.txt）。"
+                        f" 原始错误: {e}"
+                    ),
+                ) from e
 
             isz_raw = opts.get("imgsz")
             imgsz: int | None

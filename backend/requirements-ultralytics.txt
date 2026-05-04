@@ -1,0 +1,4 @@
+# 仅在需要 YOLOWEB_INFER_ENGINE=ultralytics 时使用（会安装 PyTorch，内存需 ≥1GB 更稳）。
+# Render Build Command 示例：
+#   pip install -r requirements.txt -r requirements-ultralytics.txt
+ultralytics>=8.3.46

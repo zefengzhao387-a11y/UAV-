@@ -1,6 +1,8 @@
 # Render Blueprint：部署 FastAPI ONNX 推理服务（本仓库 backend/）
 # 在 Render Dashboard → New → Blueprint → 连接仓库后勾选使用此文件
-# Free 档位在 Dashboard 手动选择；Starter+ 可避免长时间休眠导致的冷启动
+# Free / 512MB：不要装 ultralytics（PyTorch 易 OOM）。若要用 YOLOWEB_INFER_ENGINE=ultralytics，改 build：
+#   pip install -r requirements.txt -r requirements-ultralytics.txt
+# 并升级到 ≥1GB 实例更安全。
 services:
   - type: web
     name: yoloweb-inference
