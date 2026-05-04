@@ -3,11 +3,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ImageUploadCard from "@/components/ImageUploadCard";
 import TopNav from "@/components/TopNav";
-import { DetectionBox, drawBoundingBoxes, runYoloInference } from "@/utils/modelHelper";
+import type { DetectionBox, PostprocessDebugInfo } from "@/utils/modelHelper";
+import { drawBoundingBoxes } from "@/utils/modelHelper";
+import {
+  inferServiceConfigured,
+  runYoloInferRemote,
+  INFER_SERVICE_URL
+} from "@/utils/inferApi";
 
-const VISIBLE_MODEL_PATH = "/model/yolov11s-pv.onnx";
-const THERMAL_MODEL_PATH = "/model/thermal-hotspot.onnx";
 const VISIBLE_CLASSES = ["Clean", "Dust", "Bird", "Electrical", "Physical", "Snow"];
+// 官方微调后导出的热力模型为单类 hotspot。
 const THERMAL_CLASSES = ["Hotspot"];
 const STRUCTURAL_DAMAGE_CLASSES = new Set([
   "physical",
@@ -46,17 +51,26 @@ export default function AnalysisWorkspace() {
   const [visibleFile, setVisibleFile] = useState<File | null>(null);
   const [thermalFile, setThermalFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [statusText, setStatusText] = useState("等待上传两张图像");
+  const inferConfigured = useMemo(() => inferServiceConfigured(), []);
+  const [statusText, setStatusText] = useState(() =>
+    inferServiceConfigured()
+      ? "等待上传两张图像（推理在服务端执行）"
+      : "请在环境变量 NEXT_PUBLIC_INFER_SERVICE_URL 中配置后端推理服务的完整 origin"
+  );
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [debugEnabled, setDebugEnabled] = useState(false);
   const [fusionResult, setFusionResult] = useState<FusionResult>({
     highRiskCount: 0,
     structuralCandidateCount: 0,
     hotspotCandidateCount: 0
   });
+  const [visibleDebug, setVisibleDebug] = useState<PostprocessDebugInfo | null>(null);
+  const [thermalDebug, setThermalDebug] = useState<PostprocessDebugInfo | null>(null);
   const [visibleScoreThreshold, setVisibleScoreThreshold] = useState(0.52);
   const [visibleIouThreshold, setVisibleIouThreshold] = useState(0.55);
+  // 热力分支按 Ultralytics 常规检测参数
   const [thermalScoreThreshold, setThermalScoreThreshold] = useState(0.25);
-  const [thermalIouThreshold, setThermalIouThreshold] = useState(0.4);
+  const [thermalIouThreshold, setThermalIouThreshold] = useState(0.45);
 
   const visibleUrl = useObjectUrl(visibleFile);
   const thermalUrl = useObjectUrl(thermalFile);
@@ -67,8 +81,10 @@ export default function AnalysisWorkspace() {
   const thermalCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const canAnalyze = useMemo(
-    () => Boolean(visibleUrl && thermalUrl) && !isAnalyzing,
-    [visibleUrl, thermalUrl, isAnalyzing]
+    () =>
+      Boolean(visibleUrl && thermalUrl && visibleFile && thermalFile && inferConfigured) &&
+      !isAnalyzing,
+    [visibleUrl, thermalUrl, visibleFile, thermalFile, inferConfigured, isAnalyzing]
   );
 
   const clearCanvas = (canvas: HTMLCanvasElement | null) => {
@@ -105,6 +121,30 @@ export default function AnalysisWorkspace() {
     return union > 0 ? interArea / union : 0;
   };
 
+  const visibleAnalyzeOptions = {
+    classNames: VISIBLE_CLASSES,
+    hasObjectness: false as const,
+    minBoxSize: 2,
+    maxBoxAreaRatio: 0.8,
+    scoreThreshold: visibleScoreThreshold,
+    iouThreshold: visibleIouThreshold,
+    maxDetections: 120,
+    boxFormat: "cxcywh" as const
+  };
+
+  const thermalAnalyzeOptions = {
+    classNames: THERMAL_CLASSES,
+    hasObjectness: false as const,
+    applySigmoid: false,
+    fallbackToAlternateHead: false,
+    minBoxSize: 0,
+    maxBoxAreaRatio: 1,
+    scoreThreshold: thermalScoreThreshold,
+    iouThreshold: thermalIouThreshold,
+    maxDetections: 100,
+    boxFormat: "cxcywh" as const
+  };
+
   const waitImageReady = async (
     imageRef: React.RefObject<HTMLImageElement | null>
   ): Promise<HTMLImageElement> => {
@@ -129,6 +169,8 @@ export default function AnalysisWorkspace() {
     if (!canAnalyze) return;
     setErrorText(null);
     setFusionResult({ highRiskCount: 0, structuralCandidateCount: 0, hotspotCandidateCount: 0 });
+    setVisibleDebug(null);
+    setThermalDebug(null);
     setIsAnalyzing(true);
 
     try {
@@ -137,51 +179,79 @@ export default function AnalysisWorkspace() {
         waitImageReady(thermalImgRef)
       ]);
 
+      if (!visibleFile || !thermalFile) {
+        throw new Error("缺少原始图像文件，请重新选择图片");
+      }
+
       setStatusText("正在分析可见光图像...");
-      const visibleBoxes = await runYoloInference(
-        visibleImage,
-        {
-          modelPath: VISIBLE_MODEL_PATH,
-          classNames: VISIBLE_CLASSES,
-          hasObjectness: false,
-          minBoxSize: 2,
-          maxBoxAreaRatio: 0.8,
-          scoreThreshold: visibleScoreThreshold,
-          iouThreshold: visibleIouThreshold,
-          maxDetections: 120
-        },
-        setStatusText
+      let visibleBoxes: DetectionBox[];
+      if (debugEnabled) {
+        const result = await runYoloInferRemote(
+          visibleFile,
+          "visible",
+          visibleAnalyzeOptions,
+          true,
+          setStatusText
+        );
+        visibleBoxes = result.boxes;
+        setVisibleDebug(result.debug ?? null);
+      } else {
+        const result = await runYoloInferRemote(
+          visibleFile,
+          "visible",
+          visibleAnalyzeOptions,
+          false,
+          setStatusText
+        );
+        visibleBoxes = result.boxes;
+      }
+
+      // 只展示“结构性物理损伤”关键类别，减少画面噪声，评委更容易理解闭环。
+      const structuralVisibleBoxes = visibleBoxes.filter((box) =>
+        STRUCTURAL_DAMAGE_CLASSES.has(box.className.toLowerCase())
       );
-      drawBoundingBoxes(visibleCanvasRef.current!, visibleImage, visibleBoxes);
+      drawBoundingBoxes(
+        visibleCanvasRef.current!,
+        visibleImage,
+        structuralVisibleBoxes
+      );
 
       setStatusText("正在分析红外热力图...");
-      const thermalBoxes = await runYoloInference(
-        thermalImage,
-        {
-          modelPath: THERMAL_MODEL_PATH,
-          classNames: THERMAL_CLASSES,
-          hasObjectness: true,
-          applySigmoid: true,
-          fallbackToAlternateHead: false,
-          minBoxSize: 8,
-          maxBoxAreaRatio: 0.15,
-          scoreThreshold: thermalScoreThreshold,
-          iouThreshold: thermalIouThreshold,
-          maxDetections: 20
-        },
-        setStatusText
-      );
+      let thermalBoxes: DetectionBox[];
+      if (debugEnabled) {
+        const result = await runYoloInferRemote(
+          thermalFile,
+          "thermal",
+          thermalAnalyzeOptions,
+          true,
+          setStatusText
+        );
+        thermalBoxes = result.boxes;
+        setThermalDebug(result.debug ?? null);
+      } else {
+        const result = await runYoloInferRemote(
+          thermalFile,
+          "thermal",
+          thermalAnalyzeOptions,
+          false,
+          setStatusText
+        );
+        thermalBoxes = result.boxes;
+      }
+
+      // 只展示“热斑”关键类别，避免模型多输出类别导致的乱框展示。
+      const hotspotBoxes = thermalBoxes.filter((box) => {
+        // 如果热力模型是“单类导出”但解析时 classId 可能不稳定，
+        // 那么仅靠 classId 过滤会误杀正确热斑。这里改为用 TopK 置信度策略。
+        if (THERMAL_CLASSES.length === 1) return true;
+        return HOTSPOT_CLASSES.has(box.className.toLowerCase());
+      });
+
+      // 按标准 NMS 输出直接展示，不做额外 TopK 裁剪。
       drawBoundingBoxes(thermalCanvasRef.current!, thermalImage, thermalBoxes);
 
       // 双光因果闭环：
       // 仅当“结构性物理损伤”与“热斑”在归一化二维坐标上重叠触发，才确诊高危病灶。
-      const structuralVisibleBoxes = visibleBoxes.filter((box) =>
-        STRUCTURAL_DAMAGE_CLASSES.has(box.className.toLowerCase())
-      );
-      const hotspotBoxes = thermalBoxes.filter((box) =>
-        HOTSPOT_CLASSES.has(box.className.toLowerCase())
-      );
-
       const visibleNorm = structuralVisibleBoxes.map((box) =>
         normalizeBox(box, visibleImage.naturalWidth, visibleImage.naturalHeight)
       );
@@ -214,7 +284,7 @@ export default function AnalysisWorkspace() {
       }
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "分析失败");
-      setStatusText("分析失败，请检查模型与图像");
+      setStatusText("分析失败，请检查推理服务、网络与图像");
     } finally {
       setIsAnalyzing(false);
     }
@@ -258,7 +328,44 @@ export default function AnalysisWorkspace() {
       </section>
 
       <section className="mt-7 flex flex-col items-center gap-3">
+        {!inferConfigured ? (
+          <div className="panel w-full max-w-3xl border border-rose-900/70 bg-rose-950/30 px-4 py-3 text-sm text-rose-200">
+            <p className="font-semibold text-rose-100">推理服务地址未配置</p>
+            <p className="mt-2 text-xs text-rose-200/90">
+              部署时在 Vercel 项目 Settings → Environment Variables 添加{" "}
+              <code className="rounded bg-slate-950 px-1 py-0.5 font-mono text-slate-200">
+                NEXT_PUBLIC_INFER_SERVICE_URL
+              </code>{" "}
+             ，值为后端 API 的根地址（HTTPS，不含尾部斜杠），例如{" "}
+              <code className="rounded bg-slate-950 px-1 py-0.5 font-mono">
+                https://your-infer-xxxxx.up.railway.app
+              </code>
+              。ONNX 仅部署在该后端，Vercel 只托管本前端。
+            </p>
+          </div>
+        ) : (
+          <p className="w-full max-w-3xl text-center text-xs text-slate-400">
+            推理服务：<span className="text-slate-300">{INFER_SERVICE_URL}</span>（预处理与 ONNX 在上述地址执行）
+          </p>
+        )}
         <div className="panel w-full max-w-3xl px-4 py-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="text-sm text-slate-200">
+              <span className="font-semibold text-cyan-200">Debug</span> 解析面板
+              <div className="mt-1 text-xs text-slate-400">
+                显示模型输出维度、obj/坐标格式选择与 Top 框置信度（用于定位“乱框”原因）
+              </div>
+            </div>
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-200">
+              <input
+                type="checkbox"
+                checked={debugEnabled}
+                disabled={isAnalyzing}
+                onChange={(e) => setDebugEnabled(e.target.checked)}
+              />
+              开启
+            </label>
+          </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="flex flex-col gap-2 text-sm text-slate-200">
               <span>
@@ -362,6 +469,84 @@ export default function AnalysisWorkspace() {
             判定规则：仅当可见光“结构性物理损伤”与红外“热斑”在同一二维坐标系下重叠触发时，输出最高级别报警。
           </p>
         </div>
+
+        {debugEnabled && (visibleDebug || thermalDebug) && (
+          <div className="panel w-full max-w-3xl px-4 py-4 text-sm">
+            <div className="mb-3 font-semibold text-cyan-200">Debug 输出解析</div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                <div className="mb-2 text-xs font-semibold text-slate-300">可见光（Visible）</div>
+                {!visibleDebug ? (
+                  <div className="text-xs text-slate-400">等待...</div>
+                ) : (
+                  <div className="space-y-1 text-xs text-slate-300">
+                    <div>output dims: {visibleDebug.outputDims.join("x")}</div>
+                    <div>hasObjectness: {String(visibleDebug.effectiveHasObjectness)}</div>
+                    <div>boxFormat: {visibleDebug.effectiveBoxFormat}</div>
+                    <div>
+                      classes: start={visibleDebug.classStart}, num={visibleDebug.numClasses}
+                    </div>
+                    <div>returned boxes: {visibleDebug.returnedBoxes}</div>
+                    <div>
+                      Top5:
+                      <div className="mt-1 space-y-0.5">
+                        {visibleDebug.topBoxes.length === 0
+                          ? "无"
+                          : visibleDebug.topBoxes.map((b, idx) => (
+                              <div key={idx}>
+                                {b.className} {Math.round(b.score * 100)}%
+                              </div>
+                            ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                <div className="mb-2 text-xs font-semibold text-slate-300">红外热力（Thermal）</div>
+                {!thermalDebug ? (
+                  <div className="text-xs text-slate-400">等待...</div>
+                ) : (
+                  <div className="space-y-1 text-xs text-slate-300">
+                    <div>output dims: {thermalDebug.outputDims.join("x")}</div>
+                    <div>hasObjectness: {String(thermalDebug.effectiveHasObjectness)}</div>
+                    <div>boxFormat: {thermalDebug.effectiveBoxFormat}</div>
+                    <div>
+                      classes: start={thermalDebug.classStart}, num={thermalDebug.numClasses}
+                    </div>
+                    <div>returned boxes: {thermalDebug.returnedBoxes}</div>
+                    <div>
+                      fallback: {thermalDebug.fallbackUsed ? "used" : "not used"}
+                      {thermalDebug.fallbackTried && thermalDebug.fallbackTried.length > 0 && (
+                        <div className="mt-2 space-y-0.5">
+                          {thermalDebug.fallbackTried.map((t, idx) => (
+                            <div key={idx}>
+                              try hasObj={String(t.hasObjectness)} box={t.boxFormat} boxes={t.returnedBoxes} thr=
+                              {t.scoreThresholdUsed.toFixed(3)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      Top5:
+                      <div className="mt-1 space-y-0.5">
+                        {thermalDebug.topBoxes.length === 0
+                          ? "无"
+                          : thermalDebug.topBoxes.map((b, idx) => (
+                              <div key={idx}>
+                                {b.className} {Math.round(b.score * 100)}%
+                              </div>
+                            ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         {errorText && <p className="text-sm text-rose-400">{errorText}</p>}
       </section>
     </main>

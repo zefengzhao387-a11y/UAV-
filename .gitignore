@@ -1,5 +1,7 @@
 node_modules
 .next
+__pycache__/
+*.py[cod]
 *.pt
 *.onnx.data
 _export_workspace/

@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
   title: "UAV 光伏缺陷智能检测端侧系统",
-  description: "基于 Next.js 与 onnxruntime-web 的无人机光伏缺陷端侧检测系统"
+  description: "基于 Next.js 与远端 ONNX 推理服务的无人机光伏缺陷智能检测演示"
 };
 
 interface RootLayoutProps {
