@@ -6,12 +6,16 @@ import type {
 
 /**
  * 直连 Render 的 origin（可为空）。
- * @deprecated 推荐使用同源 /api/infer-proxy，见 NEXT_PUBLIC_USE_INFER_PROXY（默认开启）。
  */
 export const INFER_SERVICE_URL = (process.env.NEXT_PUBLIC_INFER_SERVICE_URL ?? "").replace(
   /\/$/,
   ""
 );
+
+/** Vercel 部署保护绕过（见文末注释）；留空则无。 */
+const VERCEL_PROTECTION_BYPASS = (
+  process.env.NEXT_PUBLIC_VERCEL_PROTECTION_BYPASS ?? ""
+).trim();
 
 /** 默认启用同源代理，规避浏览器 Failed to fetch（跨域）。设为 0 / false / no 关闭。 */
 export function useInferProxy(): boolean {
@@ -95,16 +99,32 @@ async function inferRemoteImpl(
   const ac = new AbortController();
   const timer = globalThis.setTimeout(() => ac.abort(), 180000);
   try {
+    const headers: HeadersInit =
+      proxied && VERCEL_PROTECTION_BYPASS
+        ? { "x-vercel-protection-bypass": VERCEL_PROTECTION_BYPASS }
+        : {};
+
     const res = await fetch(url, {
       method: "POST",
       mode: proxied ? "same-origin" : "cors",
       credentials: "omit",
+      headers,
       body: form,
       signal: ac.signal
     });
 
     if (!res.ok) {
       const text = await res.text();
+      if (
+        res.status === 401 &&
+        (text.includes("Vercel Authentication") || text.includes("Authentication Required"))
+      ) {
+        throw new Error(
+          "401：这是 Vercel「部署保护」（Deployment Protection）拦截了同源 /api 请求，不是 Render 报错。可选：① 使用 Production/"
+            + "自定义正式域名访问；② 在 Vercel 关闭 Preview 的 Protection；③ 或使用 Automation Bypass Secret 填环境变量 "
+            + "NEXT_PUBLIC_VERCEL_PROTECTION_BYPASS（会暴露在浏览器）。"
+        );
+      }
       throw new Error(`推理服务返回 ${res.status}: ${text || res.statusText}`);
     }
 
