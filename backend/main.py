@@ -11,7 +11,7 @@ from yolo_infer import run_yolo_inference, run_yolo_inference_with_debug
 
 app = FastAPI(title="YOLO Web Inference")
 
-INFER_ENGINE = os.environ.get("YOLOWEB_INFER_ENGINE", "ultralytics").strip().lower()
+INFER_ENGINE = os.environ.get("YOLOWEB_INFER_ENGINE", "onnx").strip().lower()
 
 _cors_origins_raw = os.environ.get("YOLOWEB_CORS_ORIGINS", "").strip()
 if _cors_origins_raw == "*":
@@ -19,7 +19,8 @@ if _cors_origins_raw == "*":
 elif _cors_origins_raw:
     _origins = [x.strip() for x in _cors_origins_raw.split(",") if x.strip()]
 else:
-    _origins = ["http://127.0.0.1:3000", "http://localhost:3000"]
+    # 未配置时放开任意来源（allow_credentials=False 下合法）。生产可自行改为显式域名列表。
+    _origins = ["*"]
 
 # 本推理 API 不使用 Cookie / Authorization；allow_credentials=False 可与 allow_origins="*" 并存，避免浏览器 CORS 静默失败。
 app.add_middleware(
