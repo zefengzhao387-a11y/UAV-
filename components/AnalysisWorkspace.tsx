@@ -16,6 +16,8 @@ import { runYoloInferClient } from "@/utils/yoloClientInfer";
 const VISIBLE_CLASSES = ["Clean", "Dust", "Bird", "Electrical", "Physical", "Snow"];
 // 官方微调后导出的热力模型为单类 hotspot。
 const THERMAL_CLASSES = ["Hotspot"];
+/** 产品上热力框统一使用该展示名（含 nc=2 时解析出的 Class-1 等）。 */
+const HOTSPOT_DISPLAY_NAME = "Hotspot";
 const STRUCTURAL_DAMAGE_CLASSES = new Set([
   "physical",
   "electrical",
@@ -24,8 +26,15 @@ const STRUCTURAL_DAMAGE_CLASSES = new Set([
   "fragment",
   "star_crack"
 ]);
-const HOTSPOT_CLASSES = new Set(["hotspot", "hot-spot", "hot_spot"]);
 const CROSS_MODAL_IOU_THRESHOLD = 0.06;
+
+/** 演示模式：将同名 PNG 放到 public/demo/ 下即可替换前后对比图（无需改代码）。 */
+const DEMO_VISIBLE_IN = "/demo/demo-visible-in.png";
+const DEMO_THERMAL_IN = "/demo/demo-thermal-in.png";
+const DEMO_VISIBLE_OUT = "/demo/demo-visible-out.png";
+const DEMO_THERMAL_OUT = "/demo/demo-thermal-out.png";
+
+type DemoImagePair = { visible: string; thermal: string };
 
 interface FusionResult {
   highRiskCount: number;
@@ -76,9 +85,13 @@ export default function AnalysisWorkspace() {
   // 热力分支按 Ultralytics 常规检测参数
   const [thermalScoreThreshold, setThermalScoreThreshold] = useState(0.25);
   const [thermalIouThreshold, setThermalIouThreshold] = useState(0.45);
+  const [demoUrls, setDemoUrls] = useState<DemoImagePair | null>(null);
+  const [isDemoRunning, setIsDemoRunning] = useState(false);
 
   const visibleUrl = useObjectUrl(visibleFile);
   const thermalUrl = useObjectUrl(thermalFile);
+  const effectiveVisibleUrl = demoUrls?.visible ?? visibleUrl;
+  const effectiveThermalUrl = demoUrls?.thermal ?? thermalUrl;
 
   const visibleImgRef = useRef<HTMLImageElement | null>(null);
   const thermalImgRef = useRef<HTMLImageElement | null>(null);
@@ -170,6 +183,57 @@ export default function AnalysisWorkspace() {
     });
   };
 
+  const handleVisibleSelected = (file: File) => {
+    setDemoUrls(null);
+    setVisibleFile(file);
+  };
+
+  const handleThermalSelected = (file: File) => {
+    setDemoUrls(null);
+    setThermalFile(file);
+  };
+
+  const runDemo = async () => {
+    if (isAnalyzing || isDemoRunning) return;
+    setIsDemoRunning(true);
+    setErrorText(null);
+    setVisibleDebug(null);
+    setThermalDebug(null);
+    setFusionResult({
+      highRiskCount: 0,
+      structuralCandidateCount: 0,
+      hotspotCandidateCount: 0
+    });
+    setVisibleFile(null);
+    setThermalFile(null);
+    clearCanvas(visibleCanvasRef.current);
+    clearCanvas(thermalCanvasRef.current);
+
+    setDemoUrls({ visible: DEMO_VISIBLE_IN, thermal: DEMO_THERMAL_IN });
+    setStatusText("演示模式：已载入示例输入图（无真实模型推理）…");
+
+    const step = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+    try {
+      await step(700);
+      setStatusText("正在分析可见光图像…");
+      await step(2200);
+      setStatusText("正在分析红外热力图…");
+      await step(2200);
+
+      setDemoUrls({ visible: DEMO_VISIBLE_OUT, thermal: DEMO_THERMAL_OUT });
+      setFusionResult({
+        highRiskCount: 1,
+        structuralCandidateCount: 12,
+        hotspotCandidateCount: 14
+      });
+      setStatusText(
+        "演示结束：已切换为预设结果图（高危 1 / 结构候选 12 / 热斑 14，仅用于展示流程）"
+      );
+    } finally {
+      setIsDemoRunning(false);
+    }
+  };
+
   const runAnalyze = async () => {
     if (!canAnalyze) return;
     setErrorText(null);
@@ -246,15 +310,15 @@ export default function AnalysisWorkspace() {
         thermalBoxes = result.boxes;
       }
 
-      // 只展示“热斑”关键类别，避免模型多输出类别导致的乱框展示。
-      const hotspotBoxes = thermalBoxes.filter((box) => {
-        // 如果热力模型是“单类导出”但解析时 classId 可能不稳定，
-        // 那么仅靠 classId 过滤会误杀正确热斑。这里改为用 TopK 置信度策略。
-        if (THERMAL_CLASSES.length === 1) return true;
-        return HOTSPOT_CLASSES.has(box.className.toLowerCase());
-      });
+      // 多类 head（如 nc=2）时仍可能解析出 Class-1：统一改成 Hotspot 以便绘制与闭环统计一致。
+      thermalBoxes = thermalBoxes.map((box) => ({
+        ...box,
+        className: HOTSPOT_DISPLAY_NAME,
+        classId: 0
+      }));
 
-      // 按标准 NMS 输出直接展示，不做额外 TopK 裁剪。
+      const hotspotBoxes = thermalBoxes;
+
       drawBoundingBoxes(thermalCanvasRef.current!, thermalImage, thermalBoxes);
 
       // 双光因果闭环：
@@ -301,11 +365,11 @@ export default function AnalysisWorkspace() {
 
   useEffect(() => {
     clearCanvas(visibleCanvasRef.current);
-  }, [visibleUrl]);
+  }, [visibleUrl, demoUrls?.visible]);
 
   useEffect(() => {
     clearCanvas(thermalCanvasRef.current);
-  }, [thermalUrl]);
+  }, [thermalUrl, demoUrls?.thermal]);
 
   return (
     <main className="mx-auto min-h-screen max-w-7xl px-4 pb-10 pt-6 md:px-8">
@@ -320,8 +384,8 @@ export default function AnalysisWorkspace() {
         <ImageUploadCard
           title="可见光图像 (Visible Light Image)"
           hint="用于识别裂纹、碎片、污染与遮挡等缺陷"
-          imageUrl={visibleUrl}
-          onFileSelected={setVisibleFile}
+          imageUrl={effectiveVisibleUrl}
+          onFileSelected={handleVisibleSelected}
           imageRef={visibleImgRef}
           canvasRef={visibleCanvasRef}
         />
@@ -329,8 +393,8 @@ export default function AnalysisWorkspace() {
         <ImageUploadCard
           title="红外热力图 (Thermal Image)"
           hint="用于识别热点与热异常区域"
-          imageUrl={thermalUrl}
-          onFileSelected={setThermalFile}
+          imageUrl={effectiveThermalUrl}
+          onFileSelected={handleThermalSelected}
           imageRef={thermalImgRef}
           canvasRef={thermalCanvasRef}
         />
@@ -465,14 +529,28 @@ export default function AnalysisWorkspace() {
           </p>
         </div>
 
-        <button
-          type="button"
-          disabled={!canAnalyze}
-          onClick={runAnalyze}
-          className="rounded-lg bg-cyan-500 px-8 py-3 font-medium text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-300"
-        >
-          {isAnalyzing ? "分析中..." : "开始缺陷分析"}
-        </button>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <button
+            type="button"
+            disabled={!canAnalyze}
+            onClick={runAnalyze}
+            className="rounded-lg bg-cyan-500 px-8 py-3 font-medium text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-300"
+          >
+            {isAnalyzing ? "分析中..." : "开始缺陷分析"}
+          </button>
+          <button
+            type="button"
+            disabled={isAnalyzing || isDemoRunning}
+            onClick={runDemo}
+            className="rounded-lg border border-cyan-500/60 bg-slate-900 px-6 py-3 font-medium text-cyan-200 transition hover:border-cyan-400 hover:text-cyan-100 disabled:cursor-not-allowed disabled:border-slate-600 disabled:text-slate-500"
+          >
+            {isDemoRunning ? "演示进行中…" : "开始演示"}
+          </button>
+        </div>
+        <p className="max-w-2xl text-center text-xs text-slate-500">
+          演示使用 <code className="rounded bg-slate-900 px-1 font-mono text-slate-400">public/demo/</code>{" "}
+          下四张固定文件名的 PNG，可直接替换为你的输入 / 结果图。
+        </p>
         <p className="text-sm text-slate-300">{statusText}</p>
         <div className="panel w-full max-w-3xl px-4 py-3 text-sm">
           <p className="text-slate-200">
