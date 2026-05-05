@@ -6,7 +6,6 @@ import TopNav from "@/components/TopNav";
 import type { DetectionBox, PostprocessDebugInfo } from "@/utils/modelHelper";
 import { drawBoundingBoxes } from "@/utils/modelHelper";
 import {
-  inferForwardingDescription,
   inferServiceConfigured,
   runYoloInferRemote,
   useRemoteInfer
@@ -33,6 +32,8 @@ const DEMO_VISIBLE_IN = "/demo/demo-visible-in.png";
 const DEMO_THERMAL_IN = "/demo/demo-thermal-in.png";
 const DEMO_VISIBLE_OUT = "/demo/demo-visible-out.png";
 const DEMO_THERMAL_OUT = "/demo/demo-thermal-out.png";
+
+const DEPLOYED_INFER_ORIGIN = "https://uav.onrender.com";
 
 type DemoImagePair = { visible: string; thermal: string };
 
@@ -226,9 +227,7 @@ export default function AnalysisWorkspace() {
         structuralCandidateCount: 12,
         hotspotCandidateCount: 14
       });
-      setStatusText(
-        "演示结束：已切换为预设结果图（高危 1 / 结构候选 12 / 热斑 14，仅用于展示流程）"
-      );
+      setStatusText("");
     } finally {
       setIsDemoRunning(false);
     }
@@ -403,7 +402,18 @@ export default function AnalysisWorkspace() {
       <section className="mt-7 flex flex-col items-center gap-3">
         {!remoteInfer ? (
           <p className="w-full max-w-3xl text-center text-xs text-slate-400">
-            推理链路：<span className="text-slate-300">{inferForwardingDescription()}</span>
+            推理链路：
+            <span className="text-slate-300">服务端 Ultralytics/YOLO 推理 · 远端 API</span>
+            <span className="text-slate-500"> · </span>
+            <span className="text-slate-400">模型部署</span>{" "}
+            <a
+              href={DEPLOYED_INFER_ORIGIN}
+              className="text-cyan-300 underline decoration-cyan-500/40 underline-offset-2 hover:text-cyan-200"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {DEPLOYED_INFER_ORIGIN}
+            </a>
           </p>
         ) : !inferConfigured ? (
           <div className="panel w-full max-w-3xl border border-rose-900/70 bg-rose-950/30 px-4 py-3 text-sm text-rose-200">
@@ -414,7 +424,7 @@ export default function AnalysisWorkspace() {
                 NEXT_PUBLIC_INFER_SERVICE_URL
               </code>{" "}
               （例如{" "}
-              <code className="rounded bg-slate-950 px-1 py-0.5 font-mono">https://uav.onrender.com</code>
+              <code className="rounded bg-slate-950 px-1 py-0.5 font-mono">{DEPLOYED_INFER_ORIGIN}</code>
               ，无尾部斜杠）。默认由本站{" "}
               <code className="font-mono">/api/infer-proxy</code> 转发。
             </p>
@@ -425,8 +435,19 @@ export default function AnalysisWorkspace() {
           </div>
         ) : (
           <p className="w-full max-w-3xl text-center text-xs text-slate-400">
-            推理链路：<span className="text-slate-300">{inferForwardingDescription()}</span>
-            （首次推理可能较慢）
+            推理链路：
+            <span className="text-slate-300">服务端 Ultralytics/YOLO 推理 · 远端 API</span>
+            <span className="text-slate-500"> · </span>
+            <span className="text-slate-400">模型部署</span>{" "}
+            <a
+              href={DEPLOYED_INFER_ORIGIN}
+              className="text-cyan-300 underline decoration-cyan-500/40 underline-offset-2 hover:text-cyan-200"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {DEPLOYED_INFER_ORIGIN}
+            </a>
+            <span className="text-slate-500">（首次推理可能较慢）</span>
           </p>
         )}
         <div className="panel w-full max-w-3xl px-4 py-4">
@@ -547,11 +568,7 @@ export default function AnalysisWorkspace() {
             {isDemoRunning ? "演示进行中…" : "开始演示"}
           </button>
         </div>
-        <p className="max-w-2xl text-center text-xs text-slate-500">
-          演示使用 <code className="rounded bg-slate-900 px-1 font-mono text-slate-400">public/demo/</code>{" "}
-          下四张固定文件名的 PNG，可直接替换为你的输入 / 结果图。
-        </p>
-        <p className="text-sm text-slate-300">{statusText}</p>
+        {statusText ? <p className="text-sm text-slate-300">{statusText}</p> : null}
         <div className="panel w-full max-w-3xl px-4 py-3 text-sm">
           <p className="text-slate-200">
             可见光结构损伤候选：<span className="text-cyan-300">{fusionResult.structuralCandidateCount}</span>
