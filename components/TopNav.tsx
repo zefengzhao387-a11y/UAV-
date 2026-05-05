@@ -17,7 +17,7 @@ export default function TopNav({ active }: TopNavProps) {
       <div className="rounded-2xl border border-slate-800 bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 px-5 py-4 shadow-lg shadow-cyan-500/5">
         <div className="flex items-center justify-between gap-3">
           <h1 className="truncate text-lg font-semibold tracking-wide text-cyan-300 md:text-xl">
-            UAV 光伏缺陷智能检测端侧系统
+            UAV 光伏缺陷智能检测系统
           </h1>
           <div className="flex items-center gap-2">
             <Link href="/" className={`${tabBase} ${active === "detect" ? activeTab : idleTab}`}>

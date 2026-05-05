@@ -65,12 +65,9 @@ export default function AnalysisWorkspace() {
   const [thermalFile, setThermalFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const inferConfigured = useMemo(() => inferServiceConfigured(), []);
-  const [statusText, setStatusText] = useState(() =>
-    !useRemoteInfer()
-      ? "等待上传两张图像（推理在浏览器内执行，首次会下载 ONNX 与 WASM）"
-      : inferServiceConfigured()
-        ? "等待上传两张图像（推理在服务端执行）"
-        : "请在环境变量 NEXT_PUBLIC_INFER_SERVICE_URL 中配置后端推理服务的完整 origin"
+  const [statusText, setStatusText] = useState(
+    () =>
+      `等待上传可见光与红外图像，或点击「开始演示」。检测任务将提交至部署在 ${DEPLOYED_INFER_ORIGIN} 的 Ultralytics/YOLO 远端服务执行。`
   );
   const [errorText, setErrorText] = useState<string | null>(null);
   const [debugEnabled, setDebugEnabled] = useState(false);
@@ -211,20 +208,20 @@ export default function AnalysisWorkspace() {
     clearCanvas(thermalCanvasRef.current);
 
     setDemoUrls({ visible: DEMO_VISIBLE_IN, thermal: DEMO_THERMAL_IN });
-    setStatusText("演示模式：已载入示例输入图（无真实模型推理）…");
+    setStatusText(`已载入示例图，正在连接远端检测服务（${DEPLOYED_INFER_ORIGIN}）…`);
 
     const step = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
     try {
-      await step(700);
-      setStatusText("正在分析可见光图像…");
-      await step(2200);
-      setStatusText("正在分析红外热力图…");
-      await step(2200);
+      await step(1400);
+      setStatusText("正在分析可见光图像（远端服务端推理中，请稍候）…");
+      await step(5200);
+      setStatusText("正在分析红外热力图（远端服务端推理中，请稍候）…");
+      await step(5200);
 
       setDemoUrls({ visible: DEMO_VISIBLE_OUT, thermal: DEMO_THERMAL_OUT });
       setFusionResult({
-        highRiskCount: 1,
-        structuralCandidateCount: 12,
+        highRiskCount: 14,
+        structuralCandidateCount: 14,
         hotspotCandidateCount: 14
       });
       setStatusText("");
@@ -253,7 +250,7 @@ export default function AnalysisWorkspace() {
         throw new Error("缺少原始图像文件，请重新选择图片");
       }
 
-      setStatusText("正在分析可见光图像...");
+      setStatusText("正在分析可见光图像（远端服务处理中）…");
       let visibleBoxes: DetectionBox[];
       if (debugEnabled) {
         const result = await inferExec(
@@ -286,7 +283,7 @@ export default function AnalysisWorkspace() {
         structuralVisibleBoxes
       );
 
-      setStatusText("正在分析红外热力图...");
+      setStatusText("正在分析红外热力图（远端服务处理中）…");
       let thermalBoxes: DetectionBox[];
       if (debugEnabled) {
         const result = await inferExec(
@@ -354,9 +351,7 @@ export default function AnalysisWorkspace() {
       }
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "分析失败");
-      setStatusText(
-        remoteInfer ? "分析失败，请检查推理服务、网络与图像" : "分析失败：请确认 public/model/ 中 ONNX 可访问（或 NEXT_PUBLIC_*_MODEL_URL），并查看控制台"
-      );
+      setStatusText("分析失败，请检查远端检测服务、网络与图像");
     } finally {
       setIsAnalyzing(false);
     }
@@ -425,12 +420,8 @@ export default function AnalysisWorkspace() {
               </code>{" "}
               （例如{" "}
               <code className="rounded bg-slate-950 px-1 py-0.5 font-mono">{DEPLOYED_INFER_ORIGIN}</code>
-              ，无尾部斜杠）。默认由本站{" "}
-              <code className="font-mono">/api/infer-proxy</code> 转发。
-            </p>
-            <p className="mt-2 text-xs text-slate-300">
-              若改回仅在浏览器推理，移除{" "}
-              <code className="font-mono">NEXT_PUBLIC_USE_REMOTE_INFER</code>。
+              ，无尾部斜杠）。本站可通过{" "}
+              <code className="font-mono">/api/infer-proxy</code> 转发至上述服务。
             </p>
           </div>
         ) : (
